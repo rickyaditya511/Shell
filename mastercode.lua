@@ -1,21 +1,19 @@
--- Astro #rylax0322 - Fixed UI Edition
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local CoreGui = game:GetService("CoreGui")
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local RS = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 local Network = require(RS.Modules.Communication.Network)
-local lp = Players.LocalPlayer
 
--- Services
+local lp = Players.LocalPlayer
 local qte = lp.PlayerGui:WaitForChild("QTE")
 local main = qte:WaitForChild("Main")
 local line = main:WaitForChild("Line")
 local bars = main:WaitForChild("Bars")
+local wayStones = workspace:WaitForChild("WayStones")
 
--- Settings
-local methods = {method1 = false, method2 = false, method3 = false, method4 = false}
+-- Method 1 variables
+local autoDigBarMethod = false
 local threshold = 5
 local cooldown = 0.15
 local lastTap = 0
@@ -23,20 +21,60 @@ local lastBar = nil
 local hasPassed = false
 local lastRotation = nil
 local rotationSpeed = 0
+
+-- Method 2 variables
+local autoDigEventMethod = false
 local eventDelay = 0.5
 local finishDelay = 0.01
-local targetRarities = {Legendary = true}
+local stuckTimeout = 1
+
+-- Method 3 variables
+local autoTargetDig3 = false
+local targetRarities3 = {Legendary = true}
 local normalWorker = 20
-local foundLog = {}
-local skipLog = {}
-local isFinishing = false
+local foundLog3 = {}
+local skipLog3 = {}
+local isFinishing3 = false
+
+-- Method 4 variables
 local autoBrutal = false
+local targetRarities4 = {Legendary = true}
 local brutalWorker = 60
-local brutalFoundLog = {}
-local brutalSkipLog = {}
-local brutalFinishing = false
-local protectEnabled = false
-local customName = "Milik sendiri"
+local brutalRefresh = 0.8
+local foundLog4 = {}
+local skipLog4 = {}
+local isFinishing4 = false
+
+-- Other features
+local autoSell = false
+local autoMerchant = false
+local sellDelay = 30
+local favoritedItems = {}
+local weightFilters = {}
+local selectedWeightItem = ""
+local selectedBuyTool = ""
+local minWeightInput = 0
+
+local fishList = {}
+local shellTools = RS:WaitForChild("Assets"):WaitForChild("Shells"):WaitForChild("Tools")
+for _, item in pairs(shellTools:GetChildren()) do
+    table.insert(fishList, item.Name)
+end
+table.sort(fishList)
+
+local equipList = {}
+local equipTools = RS:WaitForChild("Assets"):WaitForChild("Equipment"):WaitForChild("Tools")
+task.wait(3)
+for _, item in pairs(equipTools:GetChildren()) do
+    table.insert(equipList, item.Name)
+end
+table.sort(equipList)
+
+local islandList = {}
+for _, island in pairs(wayStones:GetChildren()) do
+    table.insert(islandList, island.Name)
+end
+table.sort(islandList)
 
 -- Utility
 local function getBar()
@@ -55,19 +93,64 @@ local function tap()
     vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
 end
 
-local function isTargetRarity(rarity)
-    return targetRarities[rarity] == true
+-- Old features functions
+local function favoriteAll()
+    for _, tool in pairs(lp.Backpack:GetChildren()) do
+        local fishName = tool.Name:split("_")[1]
+        if favoritedItems[fishName] then
+            pcall(function()
+                local args = {buffer.fromstring("\003\001\001"), {tool}}
+                RS:WaitForChild("ByteNetReliable"):FireServer(unpack(args))
+            end)
+        end
+    end
 end
 
-local function protectIdentity()
-    if not protectEnabled then return end
-    if lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") then
-        lp.Character.Name = customName
+local function favoriteByWeight()
+    for _, tool in pairs(lp.Backpack:GetChildren()) do
+        local fishName = tool.Name:split("_")[1]
+        local minWeight = weightFilters[fishName]
+        if minWeight then
+            local weight = tool:GetAttribute("Weight")
+            if weight and weight >= minWeight then
+                pcall(function()
+                    local args = {buffer.fromstring("\003\001\001"), {tool}}
+                    RS:WaitForChild("ByteNetReliable"):FireServer(unpack(args))
+                end)
+            end
+        end
     end
-    if lp.Character then
-        for _, part in ipairs(lp.Character:GetChildren()) do
-            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                part.Color = Color3.new(0, 0, 0)
+end
+
+local function teleportTo(islandName)
+    local island = wayStones:FindFirstChild(islandName)
+    if island then
+        local char = lp.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            char.HumanoidRootPart.CFrame = island:GetModelCFrame()
+        end
+    end
+end
+
+local function buyAllMerchant()
+    local buying = true
+    while buying do
+        buying = false
+        local result = Network.TravellingMerchant.queries.GetShop.invoke()
+        if result then
+            local data = HttpService:JSONDecode(result)
+            if data.isActive then
+                for item, stock in pairs(data.stock or {}) do
+                    if stock > 0 then
+                        pcall(function()
+                            local buyResult = Network.TravellingMerchant.queries.BuyItem.invoke(item)
+                            if buyResult and buyResult.success then
+                                if buyResult.remaining > 0 then buying = true end
+                            end
+                        end)
+                        task.wait(0.1)
+                    end
+                end
             end
         end
     end
@@ -76,7 +159,7 @@ end
 -- Method 2
 local function startMethod2()
     task.spawn(function()
-        while methods.method2 do
+        while autoDigEventMethod do
             pcall(function()
                 local args1 = {buffer.fromstring("\016"), [3] = 16}
                 RS:WaitForChild("ByteNetQuery"):InvokeServer(unpack(args1, 1, 3))
@@ -91,8 +174,8 @@ local function startMethod2()
     end)
 end
 
--- Method 3
-local function instantCollect()
+-- Method 3 collect function
+local function instantCollect3()
     pcall(function()
         local args1 = {buffer.fromstring("\016"), [3] = 16}
         RS:WaitForChild("ByteNetQuery"):InvokeServer(unpack(args1, 1, 3))
@@ -103,32 +186,39 @@ local function instantCollect()
             RS:WaitForChild("ByteNetReliable"):FireServer(unpack(args2))
         end)
     end
+    task.wait(0.5)
 end
 
-local function startMethod3()
-    task.spawn(function()
-        while methods.method3 do
-            if isFinishing then task.wait(0.05) continue end
-            pcall(function()
-                local result = Network.QTE.queries.StartQTE.invoke()
-                if result and result.rarity then
-                    local rarity = result.rarity
-                    if isTargetRarity(rarity) and not isFinishing then
-                        isFinishing = true
-                        instantCollect()
-                        isFinishing = false
-                    else
-                        if not isFinishing then Network.QTE.packets.CancelQTE.send() end
+local function spawnMethod3()
+    for i = 1, normalWorker do
+        task.spawn(function()
+            while autoTargetDig3 do
+                if isFinishing3 then task.wait(0.05) continue end
+                pcall(function()
+                    local result = Network.QTE.queries.StartQTE.invoke()
+                    if result and result.rarity then
+                        local rarity = result.rarity
+                        if targetRarities3[rarity] and not isFinishing3 then
+                            isFinishing3 = true
+                            table.insert(foundLog3, 1, "COLLECTED "..rarity)
+                            instantCollect3()
+                            isFinishing3 = false
+                        else
+                            if not isFinishing3 then
+                                table.insert(skipLog3, 1, rarity)
+                                Network.QTE.packets.CancelQTE.send()
+                            end
+                        end
                     end
-                end
-            end)
-            task.wait(0.01)
-        end
-    end)
+                end)
+                task.wait(0.01)
+            end
+        end)
+    end
 end
 
--- Method 4
-local function brutalInstantCollect()
+-- Method 4 collect function
+local function instantCollect4()
     pcall(function()
         local args1 = {buffer.fromstring("\016"), [3] = 16}
         RS:WaitForChild("ByteNetQuery"):InvokeServer(unpack(args1, 1, 3))
@@ -141,494 +231,429 @@ local function brutalInstantCollect()
     end
 end
 
-local function startMethod4()
+local function spawnMethod4()
     task.spawn(function()
         while autoBrutal do
-            if brutalFinishing then task.wait(0.005) continue end
+            if isFinishing4 then task.wait(0.005) continue end
             pcall(function()
                 local result = Network.QTE.queries.StartQTE.invoke()
                 if result and result.rarity then
                     local rarity = result.rarity
-                    if isTargetRarity(rarity) and not brutalFinishing then
-                        brutalFinishing = true
-                        brutalInstantCollect()
-                        brutalFinishing = false
+                    if targetRarities4[rarity] and not isFinishing4 then
+                        isFinishing4 = true
+                        table.insert(foundLog4, 1, "COLLECTED "..rarity)
+                        instantCollect4()
+                        isFinishing4 = false
                     else
-                        if not brutalFinishing then Network.QTE.packets.CancelQTE.send() end
+                        if not isFinishing4 then
+                            table.insert(skipLog4, 1, rarity)
+                            Network.QTE.packets.CancelQTE.send()
+                            Network.QTE.packets.CancelQTE.send()
+                        end
                     end
                 end
             end)
             task.wait(0.005)
         end
     end)
-end
-
--- ==================== CUSTOM UI V2 ====================
-local function createSmoothUI()
-    local old = CoreGui:FindFirstChild("AstroUI")
-    if old then old:Destroy() end
-
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "AstroUI"
-    ScreenGui.Parent = CoreGui
-    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    ScreenGui.ResetOnSpawn = false
-
-    -- Toggle Button (di pojok kanan bawah)
-    local ToggleBtn = Instance.new("TextButton")
-    ToggleBtn.Name = "ToggleBtn"
-    ToggleBtn.Parent = ScreenGui
-    ToggleBtn.Size = UDim2.new(0, 48, 0, 48)
-    ToggleBtn.Position = UDim2.new(1, -60, 1, -60)
-    ToggleBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 50)
-    ToggleBtn.BorderSizePixel = 0
-    ToggleBtn.Text = "⚡"
-    ToggleBtn.TextColor3 = Color3.fromRGB(140, 170, 255)
-    ToggleBtn.TextSize = 22
-    ToggleBtn.Font = Enum.Font.GothamBold
-    ToggleBtn.AutoButtonColor = false
-    ToggleBtn.ZIndex = 100
-
-    local ToggleCorner = Instance.new("UICorner", ToggleBtn)
-    ToggleCorner.CornerRadius = UDim.new(0, 14)
-
-    local ToggleStroke = Instance.new("UIStroke", ToggleBtn)
-    ToggleStroke.Color = Color3.fromRGB(100, 140, 255)
-    ToggleStroke.Thickness = 1.5
-
-    -- Main Frame
-    local MainFrame = Instance.new("Frame")
-    MainFrame.Name = "MainFrame"
-    MainFrame.Parent = ScreenGui
-    MainFrame.Size = UDim2.new(0, 340, 0, 420)
-    MainFrame.Position = UDim2.new(0.5, -170, 1, -500)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 30)
-    MainFrame.BorderSizePixel = 0
-    MainFrame.Visible = false
-    MainFrame.ZIndex = 99
-
-    local MainCorner = Instance.new("UICorner", MainFrame)
-    MainCorner.CornerRadius = UDim.new(0, 14)
-
-    local MainStroke = Instance.new("UIStroke", MainFrame)
-    MainStroke.Color = Color3.fromRGB(100, 140, 255)
-    MainStroke.Thickness = 1.2
-    MainStroke.Transparency = 0.4
-
-    -- Top Bar
-    local TopBar = Instance.new("Frame")
-    TopBar.Name = "TopBar"
-    TopBar.Parent = MainFrame
-    TopBar.Size = UDim2.new(1, 0, 0, 40)
-    TopBar.BackgroundColor3 = Color3.fromRGB(20, 20, 38)
-    TopBar.BorderSizePixel = 0
-
-    local TopCorner = Instance.new("UICorner", TopBar)
-    TopCorner.CornerRadius = UDim.new(0, 14)
-
-    local TopFix = Instance.new("Frame")
-    TopFix.Parent = TopBar
-    TopFix.Size = UDim2.new(1, 0, 0.5, 0)
-    TopFix.Position = UDim2.new(0, 0, 0.5, 0)
-    TopFix.BackgroundColor3 = Color3.fromRGB(20, 20, 38)
-    TopFix.BorderSizePixel = 0
-
-    -- Title
-    local Title = Instance.new("TextLabel")
-    Title.Name = "Title"
-    Title.Parent = TopBar
-    Title.Size = UDim2.new(1, -80, 1, 0)
-    Title.Position = UDim2.new(0, 14, 0, 0)
-    Title.BackgroundTransparency = 1
-    Title.Text = "⚡ Astro #rylax0322"
-    Title.TextColor3 = Color3.fromRGB(160, 185, 255)
-    Title.TextSize = 14
-    Title.Font = Enum.Font.GothamBold
-    Title.TextXAlignment = Enum.TextXAlignment.Left
-
-    -- Close Button
-    local CloseBtn = Instance.new("TextButton")
-    CloseBtn.Name = "CloseBtn"
-    CloseBtn.Parent = TopBar
-    CloseBtn.Size = UDim2.new(0, 28, 0, 28)
-    CloseBtn.Position = UDim2.new(1, -36, 0, 6)
-    CloseBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 55)
-    CloseBtn.BorderSizePixel = 0
-    CloseBtn.Text = "✕"
-    CloseBtn.TextColor3 = Color3.fromRGB(200, 210, 255)
-    CloseBtn.TextSize = 14
-    CloseBtn.Font = Enum.Font.GothamBold
-    CloseBtn.AutoButtonColor = false
-
-    local CloseCorner = Instance.new("UICorner", CloseBtn)
-    CloseCorner.CornerRadius = UDim.new(0, 8)
-
-    -- Content
-    local ContentFrame = Instance.new("Frame")
-    ContentFrame.Name = "Content"
-    ContentFrame.Parent = MainFrame
-    ContentFrame.Size = UDim2.new(1, 0, 1, -40)
-    ContentFrame.Position = UDim2.new(0, 0, 0, 40)
-    ContentFrame.BackgroundTransparency = 1
-    ContentFrame.BorderSizePixel = 0
-
-    -- Tab Buttons Container
-    local TabBar = Instance.new("Frame")
-    TabBar.Name = "TabBar"
-    TabBar.Parent = ContentFrame
-    TabBar.Size = UDim2.new(1, 0, 0, 32)
-    TabBar.BackgroundTransparency = 1
-    TabBar.BorderSizePixel = 0
-
-    local TabList = Instance.new("UIListLayout", TabBar)
-    TabList.FillDirection = Enum.FillDirection.Horizontal
-    TabList.Padding = UDim.new(0, 4)
-    TabList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    TabList.SortOrder = Enum.SortOrder.LayoutOrder
-
-    local UIPad = Instance.new("UIPadding", TabBar)
-    UIPad.PaddingLeft = UDim.new(0, 4)
-
-    -- Pages
-    local Pages = {}
-    local TabButtons = {}
-    local tabNames = {"Method 1", "Method 2", "Method 3", "Method 4", "Safe"}
-
-    for i, name in ipairs(tabNames) do
-        local Page = Instance.new("Frame")
-        Page.Name = "Page"..i
-        Page.Parent = ContentFrame
-        Page.Size = UDim2.new(1, -16, 1, -44)
-        Page.Position = UDim2.new(0, 8, 0, 40)
-        Page.BackgroundTransparency = 1
-        Page.BorderSizePixel = 0
-        Page.Visible = (i == 1)
-        Pages[i] = Page
-
-        local TabBtn = Instance.new("TextButton")
-        TabBtn.Name = "Tab"..i
-        TabBtn.Parent = TabBar
-        TabBtn.Size = UDim2.new(0, 55, 0, 26)
-        TabBtn.BackgroundColor3 = (i == 1) and Color3.fromRGB(100, 140, 255) or Color3.fromRGB(25, 25, 45)
-        TabBtn.BorderSizePixel = 0
-        TabBtn.Text = name == "Safe" and "🛡" or "#"..i
-        TabBtn.TextColor3 = Color3.fromRGB(210, 220, 255)
-        TabBtn.TextSize = 11
-        TabBtn.Font = Enum.Font.GothamBold
-        TabBtn.AutoButtonColor = false
-
-        local TabCorner = Instance.new("UICorner", TabBtn)
-        TabCorner.CornerRadius = UDim.new(0, 8)
-
-        TabButtons[i] = TabBtn
-
-        TabBtn.MouseButton1Click:Connect(function()
-            for j, p in ipairs(Pages) do
-                p.Visible = (j == i)
-            end
-            for j, btn in ipairs(TabButtons) do
-                btn.BackgroundColor3 = (j == i) and Color3.fromRGB(100, 140, 255) or Color3.fromRGB(25, 25, 45)
+    -- Double spawn
+    for i = 1, brutalWorker do
+        task.spawn(function()
+            while autoBrutal do
+                if isFinishing4 then task.wait(0.005) continue end
+                pcall(function()
+                    local result = Network.QTE.queries.StartQTE.invoke()
+                    if result and result.rarity then
+                        local rarity = result.rarity
+                        if targetRarities4[rarity] and not isFinishing4 then
+                            isFinishing4 = true
+                            table.insert(foundLog4, 1, "COLLECTED "..rarity)
+                            instantCollect4()
+                            isFinishing4 = false
+                        else
+                            if not isFinishing4 then
+                                table.insert(skipLog4, 1, rarity)
+                                Network.QTE.packets.CancelQTE.send()
+                            end
+                        end
+                    end
+                end)
+                task.wait(0.005)
             end
         end)
     end
-
-    -- Close function
-    CloseBtn.MouseButton1Click:Connect(function()
-        MainFrame.Visible = false
-    end)
-
-    -- Toggle function
-    ToggleBtn.MouseButton1Click:Connect(function()
-        MainFrame.Visible = not MainFrame.Visible
-        if MainFrame.Visible then
-            TweenService:Create(MainFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {Position = UDim2.new(0.5, -170, 0.5, -210)}):Play()
+    -- Refresh loop
+    task.spawn(function()
+        while autoBrutal do
+            task.wait(brutalRefresh)
+            spawnMethod4()
         end
     end)
-
-    -- Helper: create section
-    local function createSection(parent, title)
-        local Section = Instance.new("Frame")
-        Section.Name = "Sec_"..title
-        Section.Parent = parent
-        Section.Size = UDim2.new(1, 0, 0, 0)
-        Section.BackgroundColor3 = Color3.fromRGB(20, 20, 38)
-        Section.BorderSizePixel = 0
-
-        local SecCorner = Instance.new("UICorner", Section)
-        SecCorner.CornerRadius = UDim.new(0, 10)
-
-        local SecTitle = Instance.new("TextLabel")
-        SecTitle.Parent = Section
-        SecTitle.Size = UDim2.new(1, -12, 0, 24)
-        SecTitle.Position = UDim2.new(0, 6, 0, 4)
-        SecTitle.BackgroundTransparency = 1
-        SecTitle.Text = title
-        SecTitle.TextColor3 = Color3.fromRGB(140, 170, 255)
-        SecTitle.TextSize = 11
-        SecTitle.Font = Enum.Font.GothamBold
-        SecTitle.TextXAlignment = Enum.TextXAlignment.Left
-
-        local SPadding = Instance.new("UIPadding", Section)
-        SPadding.PaddingTop = UDim.new(0, 30)
-        SPadding.PaddingBottom = UDim.new(0, 6)
-        SPadding.PaddingLeft = UDim.new(0, 6)
-        SPadding.PaddingRight = UDim.new(0, 6)
-
-        local SList = Instance.new("UIListLayout", Section)
-        SList.Padding = UDim.new(0, 4)
-        SList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-        local widgets = {}
-
-        function widgets:addToggle(name, default, callback)
-            local TFrame = Instance.new("Frame")
-            TFrame.Parent = Section
-            TFrame.Size = UDim2.new(1, 0, 0, 32)
-            TFrame.BackgroundTransparency = 1
-
-            local Label = Instance.new("TextLabel")
-            Label.Parent = TFrame
-            Label.Size = UDim2.new(1, -48, 1, 0)
-            Label.BackgroundTransparency = 1
-            Label.Text = name
-            Label.TextColor3 = Color3.fromRGB(200, 210, 255)
-            Label.TextSize = 12
-            Label.Font = Enum.Font.Gotham
-            Label.TextXAlignment = Enum.TextXAlignment.Left
-
-            local TBtn = Instance.new("TextButton")
-            TBtn.Parent = TFrame
-            TBtn.Size = UDim2.new(0, 40, 0, 22)
-            TBtn.Position = UDim2.new(1, -40, 0, 5)
-            TBtn.BackgroundColor3 = default and Color3.fromRGB(100, 140, 255) or Color3.fromRGB(40, 40, 65)
-            TBtn.BorderSizePixel = 0
-            TBtn.Text = ""
-            TBtn.AutoButtonColor = false
-
-            local TCorner = Instance.new("UICorner", TBtn)
-            TCorner.CornerRadius = UDim.new(0, 11)
-
-            local Dot = Instance.new("Frame")
-            Dot.Parent = TBtn
-            Dot.Size = UDim2.new(0, 18, 0, 18)
-            Dot.Position = default and UDim2.new(1, -20, 0, 2) or UDim2.new(0, 2, 0, 2)
-            Dot.BackgroundColor3 = Color3.new(1, 1, 1)
-            Dot.BorderSizePixel = 0
-
-            local DotCorner = Instance.new("UICorner", Dot)
-            DotCorner.CornerRadius = UDim.new(0, 9)
-
-            local state = default
-            TBtn.MouseButton1Click:Connect(function()
-                state = not state
-                local goal = state and UDim2.new(1, -20, 0, 2) or UDim2.new(0, 2, 0, 2)
-                local col = state and Color3.fromRGB(100, 140, 255) or Color3.fromRGB(40, 40, 65)
-                TweenService:Create(Dot, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Position = goal}):Play()
-                TweenService:Create(TBtn, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {BackgroundColor3 = col}):Play()
-                callback(state)
-            end)
-        end
-
-        function widgets:addSlider(name, min, max, default, callback)
-            local SFrame = Instance.new("Frame")
-            SFrame.Parent = Section
-            SFrame.Size = UDim2.new(1, 0, 0, 40)
-            SFrame.BackgroundTransparency = 1
-
-            local SLabel = Instance.new("TextLabel")
-            SLabel.Parent = SFrame
-            SLabel.Size = UDim2.new(1, 0, 0, 16)
-            SLabel.BackgroundTransparency = 1
-            SLabel.Text = name .. ": " .. default
-            SLabel.TextColor3 = Color3.fromRGB(200, 210, 255)
-            SLabel.TextSize = 11
-            SLabel.Font = Enum.Font.Gotham
-            SLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-            local Bar = Instance.new("Frame")
-            Bar.Parent = SFrame
-            Bar.Size = UDim2.new(1, 0, 0, 4)
-            Bar.Position = UDim2.new(0, 0, 0, 22)
-            Bar.BackgroundColor3 = Color3.fromRGB(40, 40, 65)
-            Bar.BorderSizePixel = 0
-
-            local BarCorner = Instance.new("UICorner", Bar)
-            BarCorner.CornerRadius = UDim.new(0, 2)
-
-            local Fill = Instance.new("Frame")
-            Fill.Parent = Bar
-            Fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-            Fill.BackgroundColor3 = Color3.fromRGB(100, 140, 255)
-            Fill.BorderSizePixel = 0
-
-            local FillCorner = Instance.new("UICorner", Fill)
-            FillCorner.CornerRadius = UDim.new(0, 2)
-
-            local Hitbox = Instance.new("TextButton")
-            Hitbox.Parent = Bar
-            Hitbox.Size = UDim2.new(1, 20, 1, 20)
-            Hitbox.Position = UDim2.new(0, -10, 0, -10)
-            Hitbox.BackgroundTransparency = 1
-            Hitbox.Text = ""
-
-            local dragging = false
-            local function update(input)
-                local barSize = Bar.AbsoluteSize.X
-                local mouseX = math.clamp(input.Position.X - Bar.AbsolutePosition.X, 0, barSize)
-                local percent = mouseX / barSize
-                Fill.Size = UDim2.new(percent, 0, 1, 0)
-                local value = math.floor(min + (max - min) * percent)
-                SLabel.Text = name .. ": " .. value
-                callback(value)
-            end
-
-            Hitbox.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                    dragging = true
-                    update(input)
-                end
-            end)
-
-            Hitbox.InputEnded:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                    dragging = false
-                end
-            end)
-
-            UserInputService.InputChanged:Connect(function(input)
-                if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-                    update(input)
-                end
-            end)
-        end
-
-        function widgets:addButton(name, callback)
-            local BFrame = Instance.new("Frame")
-            BFrame.Parent = Section
-            BFrame.Size = UDim2.new(1, 0, 0, 30)
-            BFrame.BackgroundTransparency = 1
-
-            local Btn = Instance.new("TextButton")
-            Btn.Parent = BFrame
-            Btn.Size = UDim2.new(1, 0, 1, 0)
-            Btn.BackgroundColor3 = Color3.fromRGB(30, 30, 55)
-            Btn.BorderSizePixel = 0
-            Btn.Text = name
-            Btn.TextColor3 = Color3.fromRGB(140, 170, 255)
-            Btn.TextSize = 12
-            Btn.Font = Enum.Font.GothamBold
-            Btn.AutoButtonColor = false
-
-            local BCorner = Instance.new("UICorner", Btn)
-            BCorner.CornerRadius = UDim.new(0, 8)
-
-            Btn.MouseButton1Click:Connect(callback)
-        end
-
-        return widgets
-    end
-
-    -- ==================== FILL PAGES ====================
-
-    -- Page 1: Method 1
-    local p1List = Instance.new("UIListLayout", Pages[1])
-    p1List.Padding = UDim.new(0, 6)
-    p1List.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-    local s1 = createSection(Pages[1], "Manual 80% Perfect")
-    s1:addToggle("Enable Perfect Tap", false, function(v)
-        methods.method1 = v
-        if not v then lastBar = nil; hasPassed = false; lastRotation = nil end
-    end)
-    s1:addSlider("Threshold", 3, 20, 5, function(v) threshold = v end)
-    s1:addSlider("Cooldown", 0.05, 0.5, 0.15, function(v) cooldown = v end)
-
-    -- Page 2: Method 2
-    local p2List = Instance.new("UIListLayout", Pages[2])
-    p2List.Padding = UDim.new(0, 6)
-    p2List.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-    local s2 = createSection(Pages[2], "Instant Dig Blatant")
-    s2:addToggle("Enable Instant Dig", false, function(v)
-        methods.method2 = v
-        if v then startMethod2() end
-    end)
-    s2:addSlider("Start Delay", 0.1, 5, 0.5, function(v) eventDelay = v end)
-    s2:addSlider("Finish Delay", 0.01, 0.5, 0.01, function(v) finishDelay = v end)
-
-    -- Page 3: Method 3
-    local p3List = Instance.new("UIListLayout", Pages[3])
-    p3List.Padding = UDim.new(0, 6)
-    p3List.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-    local s3 = createSection(Pages[3], "Find Rarity")
-    s3:addToggle("Enable Find Rarity", false, function(v)
-        methods.method3 = v
-        if v then startMethod3() end
-    end)
-    for _, r in ipairs({"Rare", "Epic", "Legendary", "Mythic", "Exotic"}) do
-        s3:addToggle("Target: "..r, r == "Legendary", function(v) targetRarities[r] = v end)
-    end
-    s3:addSlider("Worker Count", 1, 20, 20, function(v) normalWorker = v end)
-
-    -- Page 4: Method 4
-    local p4List = Instance.new("UIListLayout", Pages[4])
-    p4List.Padding = UDim.new(0, 6)
-    p4List.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-    local s4 = createSection(Pages[4], "Brutal Dupe Mode")
-    s4:addToggle("Enable Brutal Mode", false, function(v)
-        autoBrutal = v
-        if v then startMethod4() end
-    end)
-    s4:addSlider("Worker Count", 1, 100, 60, function(v) brutalWorker = v end)
-
-    -- Page 5: Safe
-    local p5List = Instance.new("UIListLayout", Pages[5])
-    p5List.Padding = UDim.new(0, 6)
-    p5List.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-    local s5 = createSection(Pages[5], "Identity Protection")
-    s5:addToggle("Enable Protection", false, function(v) protectEnabled = v end)
-    s5:addButton("Apply Protection Now", protectIdentity)
-
-    -- Drag functionality
-    local dragging = false
-    local dragStartPos, startPos
-
-    TopBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStartPos = input.Position
-            startPos = MainFrame.Position
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStartPos
-            MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
-
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end)
-
 end
 
--- ==================== MAIN LOOPS ====================
+-- ==================== RAYFIELD UI ====================
+local Window = Rayfield:CreateWindow({
+    Name = "Astro #rylax0322",
+    LoadingTitle = "Astro #rylax0322",
+    LoadingSubtitle = "Loading...",
+    Theme = {
+        Background = Color3.fromRGB(12, 12, 28),
+        Topbar = Color3.fromRGB(18, 18, 40),
+        Shadow = Color3.fromRGB(5, 5, 15),
+        NotificationBackground = Color3.fromRGB(18, 18, 40),
+        NotificationActionsBackground = Color3.fromRGB(22, 22, 48),
+        TabBackground = Color3.fromRGB(14, 14, 32),
+        TabStroke = Color3.fromRGB(40, 40, 80),
+        TabBackgroundSelected = Color3.fromRGB(25, 25, 60),
+        TabTextColor = Color3.fromRGB(120, 120, 180),
+        SelectedTabTextColor = Color3.fromRGB(140, 160, 255),
+        ElementBackground = Color3.fromRGB(20, 20, 45),
+        ElementBackgroundHover = Color3.fromRGB(28, 28, 60),
+        SecondaryElementBackground = Color3.fromRGB(22, 22, 50),
+        ElementStroke = Color3.fromRGB(45, 45, 90),
+        SecondaryElementStroke = Color3.fromRGB(38, 38, 75),
+        SliderBackground = Color3.fromRGB(30, 30, 65),
+        SliderProgress = Color3.fromRGB(100, 120, 255),
+        SliderStroke = Color3.fromRGB(50, 50, 100),
+        ToggleBackground = Color3.fromRGB(30, 30, 65),
+        ToggleEnabled = Color3.fromRGB(100, 120, 255),
+        ToggleDisabled = Color3.fromRGB(50, 50, 90),
+        ToggleEnabledStroke = Color3.fromRGB(80, 100, 220),
+        ToggleDisabledStroke = Color3.fromRGB(40, 40, 80),
+        ToggleEnabledOuterStroke = Color3.fromRGB(60, 80, 180),
+        ToggleDisabledOuterStroke = Color3.fromRGB(30, 30, 65),
+        DropdownSelected = Color3.fromRGB(100, 120, 255),
+        DropdownUnselected = Color3.fromRGB(35, 35, 70),
+        InputBackground = Color3.fromRGB(20, 20, 45),
+        InputStroke = Color3.fromRGB(45, 45, 90),
+        PlaceholderColor = Color3.fromRGB(90, 90, 140),
+        TextColor = Color3.fromRGB(210, 215, 255),
+        SubTextColor = Color3.fromRGB(140, 145, 200),
+        PureTitleTextColor = Color3.fromRGB(160, 175, 255),
+        TitleTextColor = Color3.fromRGB(160, 175, 255),
+        ButtonColor = Color3.fromRGB(55, 60, 140),
+        ButtonStroke = Color3.fromRGB(80, 90, 180),
+        ButtonTextColor = Color3.fromRGB(220, 225, 255),
+    },
+    DisableRayfieldPrompts = true,
+    DisableBuildWarnings = true,
+})
+
+-- Tab 1: Method 1
+local Tab1 = Window:CreateTab("Method 1", nil)
+Tab1:CreateSection("Manual 80% Perfect")
+Tab1:CreateToggle({
+    Name = "Perfect Bar Follow",
+    CurrentValue = false,
+    Callback = function(v)
+        autoDigBarMethod = v
+        if not v then lastBar = nil; hasPassed = false; lastRotation = nil end
+    end
+})
+Tab1:CreateSlider({
+    Name = "Threshold", Range = {3, 20}, Increment = 1, CurrentValue = 5,
+    Callback = function(v) threshold = v end
+})
+Tab1:CreateSlider({
+    Name = "Cooldown", Range = {0.05, 0.5}, Increment = 0.01, CurrentValue = 0.15,
+    Callback = function(v) cooldown = v end
+})
+
+-- Tab 2: Method 2
+local Tab2 = Window:CreateTab("Method 2", nil)
+Tab2:CreateSection("Instant Dig Blatant")
+Tab2:CreateToggle({
+    Name = "Instant Dig",
+    CurrentValue = false,
+    Callback = function(v)
+        autoDigEventMethod = v
+        if v then startMethod2() end
+    end
+})
+Tab2:CreateSlider({
+    Name = "Start Delay", Range = {0.1, 5}, Increment = 0.1, CurrentValue = 0.5,
+    Callback = function(v) eventDelay = v end
+})
+Tab2:CreateSlider({
+    Name = "Finish Delay", Range = {0.01, 0.5}, Increment = 0.01, CurrentValue = 0.01,
+    Callback = function(v) finishDelay = v end
+})
+
+-- Tab 3: Method 3
+local Tab3 = Window:CreateTab("Method 3", nil)
+Tab3:CreateSection("Find Rarity Normal")
+for _, r in ipairs({"Rare", "Epic", "Legendary", "Mythic", "Exotic"}) do
+    Tab3:CreateToggle({
+        Name = "Target: "..r, CurrentValue = (r == "Legendary"),
+        Callback = function(v) targetRarities3[r] = v end
+    })
+end
+Tab3:CreateSlider({
+    Name = "Worker Count", Range = {1, 20}, Increment = 1, CurrentValue = 20,
+    Callback = function(v) normalWorker = v end
+})
+Tab3:CreateToggle({
+    Name = "Start Method 3", CurrentValue = false,
+    Callback = function(v)
+        autoTargetDig3 = v
+        if v then foundLog3 = {}; skipLog3 = {}; isFinishing3 = false; spawnMethod3() end
+    end
+})
+local Found3 = Tab3:CreateParagraph({Title = "Found", Content = "..."})
+local Skip3 = Tab3:CreateParagraph({Title = "Skipped", Content = "..."})
+
+-- Tab 4: Method 4
+local Tab4 = Window:CreateTab("Method 4", nil)
+Tab4:CreateSection("Brutal Dupe Mode")
+for _, r in ipairs({"Rare", "Epic", "Legendary", "Mythic", "Exotic"}) do
+    Tab4:CreateToggle({
+        Name = "Target: "..r, CurrentValue = (r == "Legendary"),
+        Callback = function(v) targetRarities4[r] = v end
+    })
+end
+Tab4:CreateSlider({
+    Name = "Worker Count", Range = {1, 100}, Increment = 1, CurrentValue = 60,
+    Callback = function(v) brutalWorker = v end
+})
+Tab4:CreateSlider({
+    Name = "Refresh Rate", Range = {0.1, 3}, Increment = 0.1, CurrentValue = 0.8,
+    Callback = function(v) brutalRefresh = v end
+})
+Tab4:CreateToggle({
+    Name = "Start Brutal Mode", CurrentValue = false,
+    Callback = function(v)
+        autoBrutal = v
+        if v then foundLog4 = {}; skipLog4 = {}; isFinishing4 = false; spawnMethod4() end
+    end
+})
+local Found4 = Tab4:CreateParagraph({Title = "Found", Content = "..."})
+local Skip4 = Tab4:CreateParagraph({Title = "Skipped", Content = "..."})
+
+-- Tab 5: Auto Sell
+local SellTab = Window:CreateTab("Auto Sell", nil)
+SellTab:CreateSection("Auto Sell")
+SellTab:CreateToggle({
+    Name = "Auto Sell", CurrentValue = false,
+    Callback = function(v)
+        autoSell = v
+        if v then
+            task.spawn(function()
+                while autoSell do
+                    pcall(function() Network.Merchant.packets.SellAll.send() end)
+                    task.wait(sellDelay)
+                end
+            end)
+        end
+    end
+})
+SellTab:CreateSlider({
+    Name = "Sell Delay (s)", Range = {10, 60}, Increment = 5, CurrentValue = 30,
+    Callback = function(v) sellDelay = v end
+})
+
+-- Tab 6: Auto Favorite
+local FavTab = Window:CreateTab("Auto Favorite", nil)
+FavTab:CreateSection("Select Items to Favorite")
+for _, fishName in pairs(fishList) do
+    FavTab:CreateToggle({
+        Name = fishName, CurrentValue = false,
+        Callback = function(v) favoritedItems[fishName] = v end
+    })
+end
+FavTab:CreateSection("Run")
+FavTab:CreateButton({
+    Name = "Favorite Selected Now",
+    Callback = function()
+        favoriteAll()
+        Rayfield:Notify({Title = "Auto Favorite", Content = "Favorited all selected items!", Duration = 2})
+    end
+})
+FavTab:CreateToggle({
+    Name = "Auto Favorite on Backpack Change", CurrentValue = false,
+    Callback = function(v)
+        if v then
+            lp.Backpack.ChildAdded:Connect(function() task.wait(0.1); favoriteAll() end)
+        end
+    end
+})
+
+-- Tab 7: Fav by Weight
+local FavWeightTab = Window:CreateTab("Fav by Weight", nil)
+FavWeightTab:CreateSection("Add Weight Filter")
+FavWeightTab:CreateDropdown({
+    Name = "Select Item", Options = fishList, CurrentOption = {fishList[1]},
+    Callback = function(v) selectedWeightItem = v[1] or v end
+})
+FavWeightTab:CreateInput({
+    Name = "Minimum Weight (kg)", PlaceholderText = "e.g. 50",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(v) minWeightInput = tonumber(v) or 0 end
+})
+local weightListLabel = FavWeightTab:CreateParagraph({Title = "Active Filters", Content = "None"})
+local function updateWeightList()
+    local lines = {}
+    for name, w in pairs(weightFilters) do
+        table.insert(lines, name .. " >= " .. w .. " kg")
+    end
+    weightListLabel:Set({Title = "Active Filters", Content = #lines > 0 and table.concat(lines, "\n") or "None"})
+end
+FavWeightTab:CreateButton({
+    Name = "Add Filter",
+    Callback = function()
+        if selectedWeightItem ~= "" and minWeightInput > 0 then
+            weightFilters[selectedWeightItem] = minWeightInput
+            updateWeightList()
+            Rayfield:Notify({Title = "Filter Added", Content = selectedWeightItem .. " >= " .. minWeightInput .. " kg", Duration = 2})
+        else
+            Rayfield:Notify({Title = "Error", Content = "Select item and enter valid weight!", Duration = 2})
+        end
+    end
+})
+FavWeightTab:CreateButton({
+    Name = "Remove Selected Filter",
+    Callback = function()
+        if weightFilters[selectedWeightItem] then
+            weightFilters[selectedWeightItem] = nil
+            updateWeightList()
+            Rayfield:Notify({Title = "Filter Removed", Content = selectedWeightItem .. " removed.", Duration = 2})
+        end
+    end
+})
+FavWeightTab:CreateSection("Run")
+FavWeightTab:CreateButton({
+    Name = "Favorite by Weight Now",
+    Callback = function()
+        favoriteByWeight()
+        Rayfield:Notify({Title = "Auto Favorite", Content = "Favorited matching weight!", Duration = 2})
+    end
+})
+FavWeightTab:CreateToggle({
+    Name = "Auto Favorite by Weight on Backpack Change", CurrentValue = false,
+    Callback = function(v)
+        if v then
+            lp.Backpack.ChildAdded:Connect(function() task.wait(0.1); favoriteByWeight() end)
+        end
+    end
+})
+
+-- Tab 8: Buy Tool
+local BuyTab = Window:CreateTab("Buy Tool", nil)
+BuyTab:CreateSection("Select Tool to Buy")
+BuyTab:CreateDropdown({
+    Name = "Select Tool", Options = equipList, CurrentOption = {equipList[1]},
+    Callback = function(v) selectedBuyTool = v[1] or v end
+})
+BuyTab:CreateButton({
+    Name = "Buy",
+    Callback = function()
+        if selectedBuyTool ~= "" then
+            pcall(function() Network.Equipment.queries.Buy.invoke(selectedBuyTool) end)
+            Rayfield:Notify({Title = "Buy Tool", Content = "Bought: " .. selectedBuyTool, Duration = 2})
+        end
+    end
+})
+
+-- Tab 9: Teleport
+local TpTab = Window:CreateTab("Teleport", nil)
+TpTab:CreateSection("Islands")
+for _, name in pairs(islandList) do
+    TpTab:CreateButton({
+        Name = name,
+        Callback = function()
+            teleportTo(name)
+            Rayfield:Notify({Title = "Teleport", Content = "Teleported to " .. name, Duration = 2})
+        end
+    })
+end
+
+-- Tab 10: Merchant
+local MerchantTab = Window:CreateTab("Merchant", nil)
+MerchantTab:CreateSection("Travelling Merchant")
+MerchantTab:CreateButton({
+    Name = "Check Merchant Status",
+    Callback = function()
+        pcall(function()
+            local result = Network.TravellingMerchant.queries.GetShop.invoke()
+            if result then
+                local data = HttpService:JSONDecode(result)
+                if data.isActive then
+                    Rayfield:Notify({Title = "Merchant", Content = "ACTIVE!", Duration = 3})
+                else
+                    local timeLeft = data.nextChangeTime - os.time()
+                    local mins = math.floor(timeLeft / 60)
+                    local secs = timeLeft % 60
+                    Rayfield:Notify({Title = "Merchant", Content = "Arrives in: " .. mins .. "m " .. secs .. "s", Duration = 3})
+                end
+            end
+        end)
+    end
+})
+MerchantTab:CreateButton({
+    Name = "Buy All Now",
+    Callback = function()
+        pcall(function()
+            local result = Network.TravellingMerchant.queries.GetShop.invoke()
+            if result then
+                local data = HttpService:JSONDecode(result)
+                if data.isActive then
+                    task.spawn(buyAllMerchant)
+                    Rayfield:Notify({Title = "Merchant", Content = "Buying all!", Duration = 2})
+                else
+                    Rayfield:Notify({Title = "Merchant", Content = "Not active!", Duration = 2})
+                end
+            end
+        end)
+    end
+})
+MerchantTab:CreateToggle({
+    Name = "Auto Buy When Merchant Arrives", CurrentValue = false,
+    Callback = function(v)
+        autoMerchant = v
+        if v then
+            task.spawn(function()
+                local merchantBought = false
+                while autoMerchant do
+                    pcall(function()
+                        local result = Network.TravellingMerchant.queries.GetShop.invoke()
+                        if result then
+                            local data = HttpService:JSONDecode(result)
+                            if data.isActive and not merchantBought then
+                                buyAllMerchant()
+                                merchantBought = true
+                            elseif not data.isActive then
+                                merchantBought = false
+                            end
+                        end
+                    end)
+                    task.wait(5)
+                end
+            end)
+        end
+    end
+})
+
+-- Live update paragraphs
+task.spawn(function()
+    while task.wait(0.3) do
+        if autoTargetDig3 then
+            Found3:Set({Title = "Found ["..#foundLog3.."]", Content = #foundLog3 > 0 and table.concat(foundLog3, "\n") or "None"})
+            Skip3:Set({Title = "Skipped ["..#skipLog3.."]", Content = #skipLog3 > 0 and table.concat(skipLog3, "\n") or "None"})
+        end
+        if autoBrutal then
+            Found4:Set({Title = "Found ["..#foundLog4.."]", Content = #foundLog4 > 0 and table.concat(foundLog4, "\n") or "None"})
+            Skip4:Set({Title = "Skipped ["..#skipLog4.."]", Content = #skipLog4 > 0 and table.concat(skipLog4, "\n") or "None"})
+        end
+    end
+end)
+
+-- Method 1 RenderStepped
 RunService.RenderStepped:Connect(function()
-    if methods.method1 and qte.Enabled then
+    if autoDigBarMethod and qte.Enabled then
         pcall(function()
             local bar = getBar()
             if not bar then return end
             if bar ~= lastBar then
-                hasPassed = false
-                lastBar = bar
-                lastRotation = nil
+                hasPassed = false; lastBar = bar; lastRotation = nil
             end
             local br = bar.Rotation % 360
             if br < 0 then br = br + 360 end
@@ -644,17 +669,15 @@ RunService.RenderStepped:Connect(function()
             if diff > 25 then hasPassed = true end
             local predicted = diff - (rotationSpeed * 0.03)
             if hasPassed and predicted <= threshold and tick() - lastTap >= cooldown then
-                lastTap = tick()
-                hasPassed = false
+                lastTap = tick(); hasPassed = false
                 task.spawn(tap)
             end
         end)
     end
 end)
 
-task.spawn(function()
-    while task.wait(2) do protectIdentity() end
-end)
-
--- ==================== LOAD ====================
-createSmoothUI()
+Rayfield:Notify({
+    Title = "Astro #rylax0322",
+    Content = "Loaded successfully!",
+    Duration = 3,
+})
