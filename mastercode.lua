@@ -5,7 +5,7 @@ local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local RS = game:GetService("ReplicatedStorage")
-local VIS = game:GetService("VirtualInputService")
+local VIS = game:GetService("VirtualInputManager")
 local Network = require(RS.Modules.Communication.Network)
 local lp = Players.LocalPlayer
 
